@@ -51,15 +51,19 @@ fullSeta::GenParser Char st String
 fullSeta = do
                 char '['
                 full <- charSeta
-                char ']'
                 return full;
 
 -- [1-7a-zQ]
 charSeta::GenParser Char st String
 charSeta = do
-                first <- getRangea 
-                -- next <- charSeta
-                return first
+                ^
+                first <- try (getRangea) <|> try (getOnea ) <|> string "]"
+                if first == "]" then
+                        return []
+                else
+                  do 
+                        later <- charSeta
+                        return (first ++ later)
 
 getOnea::GenParser Char st String
 getOnea = do
@@ -67,7 +71,7 @@ getOnea = do
                 return [some]
 
 getRangea::GenParser Char st String
-getRangea = getRangeaz  <|> getRangeAZ  <|> getRange09 <|> getOnea
+getRangea = getRangeaz  <|> getRangeAZ  <|> getRange09
 -- cells = 
 --     do first <- cellContent
 --        next <- remainingCells
