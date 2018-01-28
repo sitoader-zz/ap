@@ -23,60 +23,31 @@ import AST
 -- | a Parser for symbols
 -- symP :: Parser Char
 -- symP = liftM CharSet $ satisfy (\x -> and (map (x /=) [')', '^', '$', '*', '+', '|', '?']))
--- data ESCchar = "\\t"
-data Digit = Digit0 | Digit1
-type Digit0 = Int
-type Digit1 = Int
 
-charSet::Parser String 
-charSet = do
+
+fullSet::GenParser Char st String
+fullSet = do
                 char '['
-                x <- many (noneOf ['-', '\\', ']', '^'])
-                char ']'
-                return  (getRange x) 
-
-getRange:: String -> String
-getRange x 
-    | '-' `elem` x = x
-    | otherwise = x
-
-
--- cells :: GenParser Char st String
--- cells = 
---     do first <- cellContent
---        next <- remainingCells
---        return (first : next)
-
-fullSeta::GenParser Char st String
-fullSeta = do
-                char '['
-                full <- charSeta
+                full <- charSet
                 return full;
 
--- [1-7a-zQ]
-charSeta::GenParser Char st String
-charSeta = do
-                ^
-                first <- try (getRangea) <|> try (getOnea ) <|> string "]"
+charSet::GenParser Char st String
+charSet = do
+                first <- try (getRange) <|> try (getOne) <|> string "." <|> string "]"
                 if first == "]" then
                         return []
                 else
                   do 
-                        later <- charSeta
+                        later <- charSet
                         return (first ++ later)
 
-getOnea::GenParser Char st String
-getOnea = do
+getOne::GenParser Char st String
+getOne = do
                 some <- oneOf  ['a'..'z'] <|> oneOf  ['A'..'Z'] <|> oneOf  ['0'..'9']
                 return [some]
 
-getRangea::GenParser Char st String
-getRangea = getRangeaz  <|> getRangeAZ  <|> getRange09
--- cells = 
---     do first <- cellContent
---        next <- remainingCells
---        return (first : next)
-
+getRange::GenParser Char st String
+getRange = getRangeaz  <|> getRangeAZ  <|> getRange09
 
 getRangeaz::GenParser Char st String
 getRangeaz = do
@@ -99,10 +70,8 @@ getRange09 = do
     c2 <- oneOf ['0'..'9']
     return [c1..c2] 
 
-
-
 charClassParser::Parser RE
-charClassParser = CharClass <$> (fmap S.fromList $ charSet)
+charClassParser = CharClass <$> (fmap S.fromList $ fullSet)
 
 
 -------------
@@ -110,9 +79,9 @@ charClassParser = CharClass <$> (fmap S.fromList $ charSet)
 
 altParser::Parser RE
 altParser = do
-    s1 <- choice [charClassParser,supParser,negParser]
+    s1 <- choice [supParser, charClassParser,negParser]
     _  <- char '|'
-    s2 <- choice [charClassParser,supParser,negParser]
+    s2 <- choice [supParser,charClassParser,negParser]
     return (Alt s1 s2)
 
 
@@ -148,7 +117,7 @@ reParser = charClassParser
 -- statementP :: GenParser Char Reg
 -- statementP = sequenceP <|> nonSequenceP where
 --   altP = do
---     s1 <- choice [repP, zeroP, parensP]
+--     s1 <- choice [charClassParser]
 --     _  <- char '|'
 --     s2 <- parensP
 --     return (Alt s1 s2)
