@@ -6,7 +6,6 @@
 -module(task).
 -behaviour(gen_server).
 
-
 -export([stop/0, init/1, handle_call/3, handle_cast/2, state/0, get/1, delete/1, put/2]).
 -export([new/0]).
 -export([eager/1, lazy/1, peek/1, retrieve/1, cancel/1,
@@ -28,47 +27,16 @@ state() -> gen_server:call(?MODULE, {get_state}).
 get(Key) -> gen_server:call(?MODULE, {get, Key}).
 delete(Key) -> gen_server:cast(?MODULE, {delete, Key}).
 put(Key, Value) -> gen_server:cast(?MODULE, {put, {Key, Value}}).
+async_call(Fun, Task_name) -> gen_server:cast(?MODULE, {async_call, {Fun, Task_name}}).
 
-  
-handle_call({get, Key}, _, State) ->
-    Response = maps:get(Key, State, undefined),
-    {reply, Response, State};
-
-% handle_call({request, {task, {Prefix, Params}, From, Ref}}, _, State) ->
-%   Pair=maps:get(Prefix, State, undefined),
-%   [Action] = maps:keys(Pair),
-%   Env = maps:get("Env", State, undefined),
-%   Result = Action:action({Prefix, Params}, Env, State),
-%   case Result of
-%       {no_change, Content} ->   ChangedState = State,    From ! {Ref, {200, Content}}; 
-%       {new_state, Content, ChangedState} ->   From ! {Ref, {200, Content}}; 
-%      unknown -> ChangedState = State, From ! {Ref, {500, "error"}} %
-%   end,
-%     Response = {current_state, ChangedState},
-%     {reply, Response, ChangedState};
-
-handle_call({eager, Fun}, _, State) ->
-    Index_task = maps:get("current_no_tasks", State),
-%%  io:fwrite("After get_a_room server State: ~p~n", [Index_task]),
-    StrInt = integer_to_list(Index_task),
-    New_task = list_to_atom("task" ++ StrInt),
-    task:put(New_task, #{}),
-    task:put("current_no_tasks", Index_task+1),
-    {reply, New_task, State};
-
-
-
-handle_call({get_state}, _, State) ->
-    Response = {current_state, State},
-    {reply, Response, State}.
-
-%% handle_cast({eager, Fun}, State) ->
-%% %%   Index_task = maps:get("current_no_tasks") + 1,
-%% %%   New_task = list_to_atom("task" ++ Index_task),
-%%  New_task = list_to_atom("task" ++ "1"),
-%% %%     task:put(New_task, #{}),
-%%     {noreply,State};
-
+handle_cast({async_call, {Fun, Task_name}}, State) ->
+    Value = apply(fun_module, Fun, []),
+    Current_task = maps:get(Task_name, State),
+    Updated_task = maps:put("value", Value, Current_task),
+    Updated_task_2 = maps:put("state", complete, Updated_task),
+    io:fwrite("Updated_task: ~p~n", [Updated_task_2]),
+    task:put(Task_name, Updated_task_2),
+    {noreply, State};
 
 handle_cast({put, {Key, Value}}, State) ->
     NewState = maps:put(Key, Value, State),
@@ -77,14 +45,59 @@ handle_cast({put, {Key, Value}}, State) ->
 handle_cast({delete, Key}, State) ->
     NewState = maps:remove(Key, State),
     {noreply, NewState}.
-%% 
-%% eager(Fun) -> gen_server:cast(?MODULE, {eager, Fun}). 
+
+
+handle_call({get, Key}, _, State) ->
+    Response = maps:get(Key, State, undefined),
+    {reply, Response, State};
+
+
+handle_call({get_state}, _, State) ->
+    Response = {current_state, State},
+    {reply, Response, State};
+
+
+handle_call({eager, Fun}, _, State) ->
+    Index_task = maps:get("current_no_tasks", State),
+    StrInt = integer_to_list(Index_task),
+    New_task = list_to_atom("task" ++ StrInt),
+%%  io:fwrite("After get_a_room server State: ~p~n", [Value]),
+    task:put(New_task, #{"value"=>"", "type" =>eager, "state"=>running, "fct"=>Fun}),
+    task:put("current_no_tasks", Index_task+1),
+    async_call(Fun, New_task),
+    {reply, New_task, State};
+
+handle_call({lazy, Fun}, _, State) ->
+    Index_task = maps:get("current_no_tasks", State),
+%%  io:fwrite("After get_a_room server State: ~p~n", [Index_task]),
+    StrInt = integer_to_list(Index_task),
+    New_task = list_to_atom("task" ++ StrInt),
+%%  io:fwrite("After get_a_room server State: ~p~n", [Value]),
+    task:put(New_task, #{"value"=>"","type" =>lazy, "state"=>none, "fct"=>Fun}),
+    task:put("current_no_tasks", Index_task+1),
+    {reply, New_task, State};
+
+handle_call({peek, T}, _, State) ->
+    Requested_task = maps:get(T, State),
+    Status_task = maps:get("state", Requested_task),
+    io:fwrite("Updated_task: ~p~n", [Status_task]),
+    if Status_task == none ->  
+                           Task_fun = maps:get("fct", Requested_task), 
+                           async_call(Task_fun, T), 
+                           Current_task = maps:get(T, State),
+                           Updated_task = maps:put("state", running, Current_task),
+                           io:fwrite("Updated_task: ~p~n", [Updated_task]),
+                           task:put(T, Updated_task),
+                           Status = running;
+                   true -> Status = Status_task
+    end,
+    {reply, Status, State}.
+
+
 
 eager(Fun) -> gen_server:call(?MODULE, {eager, Fun}).
-
-lazy(_) -> undefined.
-
-peek(_) -> undefined.
+lazy(Fun) -> gen_server:call(?MODULE, {lazy, Fun}).
+peek(T) -> gen_server:call(?MODULE, {peek, T}).
 
 retrieve(_) -> undefined.
 
