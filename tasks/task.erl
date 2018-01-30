@@ -54,6 +54,7 @@ handle_cast({async_call, {Fun, Task_name}}, State) ->
 %%                                    io:fwrite("After get_a_room server State: ~p~n", [State]),
 %%             Updated_task_2 = maps:put("state", complete, Updated_task),
             task:put(Task_name, Updated_task),
+            change_state({Task_name,Updated_task}, completed),
 %%                                    io:fwrite("After get_a_room server State: ~p~n", [New_state]),
 %%                                    change_state(Task_name, completed, State),
                                          {noreply, State};
