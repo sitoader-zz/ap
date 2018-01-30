@@ -28,17 +28,36 @@ get(Key) -> gen_server:call(?MODULE, {get, Key}).
 delete(Key) -> gen_server:cast(?MODULE, {delete, Key}).
 put(Key, Value) -> gen_server:cast(?MODULE, {put, {Key, Value}}).
 async_call(Fun, Task_name) -> gen_server:cast(?MODULE, {async_call, {Fun, Task_name}}).
+change_state({T,Info}, NewStatus) -> 
+%%     Current_task = maps:get(T, State),
+    Updated_task = maps:put("state", NewStatus, Info),
+    task:put(T, Updated_task),
+    Observer_fct = maps:get("observer", Info, undefined),
+    if Observer_fct==undefined -> ok;
+       true -> if NewStatus == completed -> Val = maps:get("value", Info, undefined),
+                                            apply(observer_module, Observer_fct, [ok,Val]);
+                             true -> ok
+               end
+    end,
+    ok.
 
 handle_cast({async_call, {Fun, Task_name}}, State) ->
     Value = apply(fun_module, Fun, []),
     Current_task = maps:get(Task_name, State),
     Status_task = maps:get("state", Current_task),
-    if Status_task =/= cancelled ->  
-            Updated_task = maps:put("value", Value, Current_task),
-            Updated_task_2 = maps:put("state", complete, Updated_task),
-            task:put(Task_name, Updated_task_2),
-             {noreply, State};
-        true ->  {noreply, State}
+    if  Status_task == overwritten ->  change_state({Task_name,Current_task}, completed);
+        Status_task =/= cancelled ->  Updated_task = maps:put("value", Value, Current_task),
+%%                                    io:fwrite("After get_a_room server State: ~p~n", [Updated_task]),
+%%                                      task:put(Task_name, Updated_task), 
+%%                                    io:fwrite("After get_a_room server State: ~p~n", [State]),
+%%                                      change_state(Task_name, completed, State),
+%%                                    io:fwrite("After get_a_room server State: ~p~n", [State]),
+%%             Updated_task_2 = maps:put("state", complete, Updated_task),
+            task:put(Task_name, Updated_task),
+%%                                    io:fwrite("After get_a_room server State: ~p~n", [New_state]),
+%%                                    change_state(Task_name, completed, State),
+                                         {noreply, State};
+                                true ->  {noreply, State}
     end;
    
 
@@ -88,11 +107,9 @@ handle_call({peek, T}, _, State) ->
     if Status_task == none ->  
                            Task_fun = maps:get("fct", Requested_task), 
                            async_call(Task_fun, T), 
-                           Current_task = maps:get(T, State),
-                           Updated_task = maps:put("state", running, Current_task),
-                           io:fwrite("Updated_task: ~p~n", [Updated_task]),
-                           task:put(T, Updated_task),
+                           change_state({T,Requested_task}, running),
                            Status = running;
+       Status_task == overwritten -> Status = running;
                    true -> Status = Status_task
     end,
     {reply, Status, State};
@@ -104,20 +121,40 @@ handle_call({cancel, T}, _, State) ->
                            Task_fun = maps:get("fct", Requested_task), 
 %%                         cancel fct exec
 %%                         async_call(Task_fun, T), 
-                           Current_task = maps:get(T, State),
-                           Updated_task = maps:put("state", cancelled, Current_task),
-                           task:put(T, Updated_task),
+%%                            Current_task = maps:get(T, State),
+%%                            Updated_task = maps:put("state", cancelled, Current_task),
+%%                            task:put(T, Updated_task),
+                            change_state({T, Requested_task}, cancelled),
                            Response=cancelled;
                             true -> Response=cancelled
     end,
     {reply, Response, State};
 
-handle_call({change_state, T, NewStatus}, _, State) ->
+handle_call({overwrite, {T, Val}}, _, State) ->
     Current_task = maps:get(T, State),
-    Updated_task = maps:put("state", NewStatus, Current_task),
+    Status_task = maps:get("state", Current_task),
+    if Status_task == running  ->  
+                            change_state({T,Current_task}, overwritten),
+                            Updated_task = maps:put("value", Val, Current_task),
+                            task:put(T, Updated_task), 
+                           Response=ok;
+                            true -> Response=ok
+    end,
+    {reply, Response, State};
+
+handle_call({when_done, {T, Observer}}, _, State) ->
+    Current_task = maps:get(T, State),
+    Updated_task = maps:put("observer", Observer, Current_task),
     task:put(T, Updated_task),
-        io:fwrite("After get_a_room server State: ~p~n", [Updated_task]),
-    {reply,ok, State}.
+    Status_task = maps:get("state", Current_task),
+    Val = maps:get("value", Current_task),
+    io:fwrite("After get_a_room server State: ~p~n", [Val]),
+    if Status_task == completed  ->   apply(observer_module, Observer, [{ok,Val}]);
+       Status_task == cancelled  ->  apply(observer_module, Observer, [{error,cancel,cancel}]);
+       true ->ok
+    end,
+    {reply, ok, State}.
+
 
 eager(Fun) -> gen_server:call(?MODULE, {eager, Fun}).
 lazy(Fun) -> gen_server:call(?MODULE, {lazy, Fun}).
@@ -126,11 +163,11 @@ peek(T) -> gen_server:call(?MODULE, {peek, T}).
 retrieve(_) -> undefined.
 cancel(T) -> gen_server:call(?MODULE, {cancel, T}).
 
-change_state(T, NewStatus) -> gen_server:call(?MODULE, {change_state, T, NewStatus}).
-%% when_done(T, Observer) -> gen_server:call(?MODULE, {when_done, T, Observer}).
+%% when_done(_, _) -> undefined.
 
-when_done(_, _) -> undefined.
-overwrite(_, _) -> undefined.
+when_done(T, Observer) -> gen_server:call(?MODULE, {when_done, {T, Observer}}).
+
+overwrite(T, Val) -> gen_server:call(?MODULE, {overwrite, {T, Val}}).
 
 from_module(_, _) -> undefined.
 
